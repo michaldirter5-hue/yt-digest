@@ -161,9 +161,13 @@ def from_rss(channel_id: str, since: datetime) -> list[dict]:
 
 
 def from_api_search(query: str, since: datetime) -> list[dict]:
+    lang = "pl"
+    if query.startswith("[en]"):
+        lang, query = "en", query[4:].strip()
+    extra = {"relevanceLanguage": "pl", "regionCode": "PL"} if lang == "pl" else {"relevanceLanguage": "en"}
     res = api("search", part="snippet", q=query, type="video", order="relevance",
               publishedAfter=since.strftime("%Y-%m-%dT%H:%M:%SZ"),
-              maxResults=SEARCH_PER_QUERY, safeSearch="none")
+              maxResults=SEARCH_PER_QUERY, safeSearch="none", **extra)
     out = []
     for it in res.get("items", []):
         sn = it["snippet"]
@@ -180,6 +184,17 @@ def from_api_search(query: str, since: datetime) -> list[dict]:
             "query": query,
         })
     return out
+
+
+NON_LATIN = re.compile(r"[\u0400-\u04FF\u0600-\u06FF\u0900-\u0DFF\u0E00-\u0E7F\u3040-\u30FF\u3400-\u9FFF\uAC00-\uD7AF]")
+
+
+def lang_ok(v: dict) -> bool:
+    """Tylko polski i angielski (dla filmów spoza subów)."""
+    if NON_LATIN.search(v.get("title", "")):
+        return False
+    lg = (v.get("language") or "").lower()
+    return not lg or lg.startswith(("pl", "en"))
 
 
 # ---------- wzbogacanie przez API (1 jednostka / 50 filmów) ----------
@@ -264,7 +279,7 @@ def main():
         min_d = MIN_DURATION_SEARCH_S if v["source"] != "subskrypcja" else MIN_DURATION_S
         if dur and dur < min_d:
             continue
-        if v["source"] != "subskrypcja" and not dur:
+        if v["source"] != "subskrypcja" and (not dur or not lang_ok(v)):
             continue
         v["url"] = f"https://www.youtube.com/watch?v={v['id']}"
         if v.get("views") and v.get("likes") is not None:
