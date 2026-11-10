@@ -19,6 +19,8 @@ jobs:
           python-version: "3.12"
       - run: pip install -U -r requirements.txt
       - run: python fetch.py
+        env:
+          YT_API_KEY: ${{ secrets.YT_API_KEY }}
       - name: Zapisz wynik
         run: |
           git config user.name "yt-digest-bot"
