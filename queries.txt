@@ -1,0 +1,18 @@
+# Wyszukiwania do odkrywania nowych kanałów (najnowsze filmy).
+# Jedno zapytanie na linię. Linie z # są ignorowane.
+analiza makroekonomiczna polska
+inflacja stopy procentowe RPP analiza
+rynek akcji GPW analiza spółki
+inwestowanie długoterminowe ETF
+analiza fundamentalna spółki dywidendowe
+bitcoin analiza on-chain
+bitcoin cykl rynkowy analiza
+ekonomia austriacka
+psychoterapia wywiad psychoterapeuta
+psychologia rozwoju osobistego wywiad
+męskość psychologia rozmowa
+mtb enduro polska
+bmx street
+macro economics deep dive
+bitcoin on-chain analysis
+mtb trail riding

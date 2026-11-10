@@ -1,0 +1,55 @@
+# Kanały śledzone przez RSS (nazwa tak, jak na YouTube).
+# Jedna nazwa na linię. Linie z # są ignorowane.
+# Jeśli kanał rozpozna się źle, wpisz zamiast nazwy jego ID (UC...) albo link https://www.youtube.com/@handle
+
+# --- Ekonomia, gospodarka, inwestycje ---
+Paul Crow - Finanse
+namzalezy.pl
+namzalezy PLUS
+Tomasz Drwal
+Bartosz Kopczyński
+Białe Kołnierzyki
+Finansowy Prepper
+Gancarz Research
+Studio Expertia
+Fryderyk Karzełek
+Uczelnia ASBiRO
+Michał Jesionowski
+Fundacja PAFERE
+W 80 spółek dookoła świata
+Biznes Klasa
+Krzysztof Sarnecki
+Warsaw Enterprise Institute
+Marek Kotoński
+Rafał Mazur
+Marcin Iwuć
+Wojciech Orzechowski
+Wynajmistrz
+Radek Pogoda
+Piotr Ostapowicz
+Druga Strona Medalu
+
+# --- Bitcoin / krypto ---
+Krypto Kamikaze
+Encyklopedia Kryptowalut
+Instytut Kryptografii
+
+# --- Rozwój osobisty, psychologia, manosfera ---
+Radio Samiec 2
+Phil Konieczny
+Maciej Wieczorek
+Cezary Graf
+Stanisław Krajski
+Angie Marino
+Uszi
+
+# --- MTB / BMX ---
+Dirt It More
+Billy Perry
+Full Bike
+Independent Trucks
+Tyler Fernengel
+Red Bull Bike
+ENDUROFINA
+NecroTrails
+Godziek Brothers
