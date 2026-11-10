@@ -1,11 +1,12 @@
-"""Zbiera nowe filmy z subskrybowanych kanałów (RSS) i z wyszukiwań (yt-dlp).
+"""Zbiera nowe filmy: subskrypcje (RSS) + wyszukiwanie tematyczne (YouTube Data API).
 
 Wynik: data/latest.json, który co rano czyta Claude i robi z niego digest.
-Nie wymaga żadnych kluczy API.
+Klucz API w sekrecie repo: YT_API_KEY. Bez klucza działa sam RSS.
 """
 from __future__ import annotations
 
 import json
+import os
 import re
 import sys
 import time
@@ -15,7 +16,6 @@ from pathlib import Path
 from urllib.parse import quote
 
 import requests
-import yt_dlp
 
 ROOT = Path(__file__).parent
 DATA = ROOT / "data"
@@ -23,15 +23,20 @@ DATA.mkdir(exist_ok=True)
 RESOLVED = DATA / "channels_resolved.json"
 SEEN = DATA / "seen.json"
 LATEST = DATA / "latest.json"
+DISCOVERED = DATA / "discovered_channels.json"
 
-LOOKBACK_HOURS = 48          # jak daleko wstecz patrzymy w RSS
-SEARCH_PER_QUERY = 12        # ile najnowszych wyników na zapytanie
-MAX_CANDIDATES = 90          # górny limit kandydatów do wzbogacenia
-MIN_DURATION_S = 180         # krótsze = Shorts/zajawki, odrzucamy
-TRANSCRIPT_CHARS = 5000      # ile znaków transkryptu zapisujemy
-SEEN_KEEP = 3000
+API_KEY = os.environ.get("YT_API_KEY", "").strip()
+API = "https://www.googleapis.com/youtube/v3"
 
-UA = {"User-Agent": "Mozilla/5.0 (yt-digest; +https://github.com)"}
+LOOKBACK_HOURS = 48           # okno czasowe nowych filmów
+SEARCH_PER_QUERY = 15         # wyników na zapytanie (1 zapytanie = 100 jednostek limitu)
+MAX_SEARCH_QUERIES = 40       # 40 x 100 = 4000 z 10 000 dziennego limitu
+MIN_DURATION_S = 240          # krótsze odrzucamy (Shorts, zajawki)
+MIN_DURATION_SEARCH_S = 480   # dla filmów spoza subów: min. 8 minut
+MAX_SEARCH_CANDIDATES = 120   # ile filmów spoza subów przekazać do oceny
+SEEN_KEEP = 4000
+
+UA = {"User-Agent": "Mozilla/5.0 (yt-digest)"}
 NS = {
     "atom": "http://www.w3.org/2005/Atom",
     "yt": "http://www.youtube.com/xml/schemas/2015",
@@ -58,17 +63,27 @@ def load_json(p: Path, default):
         return default
 
 
-def ydl(extra: dict | None = None) -> yt_dlp.YoutubeDL:
-    opts = {"quiet": True, "no_warnings": True, "skip_download": True,
-            "socket_timeout": 20, "ignoreerrors": True}
-    opts.update(extra or {})
-    return yt_dlp.YoutubeDL(opts)
+def api(endpoint: str, **params) -> dict:
+    params["key"] = API_KEY
+    r = requests.get(f"{API}/{endpoint}", params=params, timeout=30)
+    if r.status_code != 200:
+        log("API error", endpoint, r.status_code, r.text[:300])
+        return {}
+    return r.json()
+
+
+def iso_duration(s: str) -> int:
+    m = re.fullmatch(r"P(?:(\d+)D)?T?(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?", s or "")
+    if not m:
+        return 0
+    d, h, mi, se = (int(x or 0) for x in m.groups())
+    return d * 86400 + h * 3600 + mi * 60 + se
 
 
 # ---------- rozpoznawanie kanałów ----------
 
 def resolve_channel(entry: str) -> dict | None:
-    """Zamienia nazwę / @handle / link / UC-id na {id, title}."""
+    """Nazwa / @handle / link / UC-id -> {id, title}."""
     if re.fullmatch(r"UC[\w-]{22}", entry):
         return {"id": entry, "title": entry}
     if entry.startswith("http") or entry.startswith("@"):
@@ -82,46 +97,40 @@ def resolve_channel(entry: str) -> dict | None:
         except Exception as e:
             log("resolve url fail", entry, e)
         return None
-    # nazwa -> wyszukiwanie z filtrem "kanał"
-    url = f"https://www.youtube.com/results?search_query={quote(entry)}&sp=EgIQAg%253D%253D"
-    with ydl({"extract_flat": True, "playlistend": 3}) as y:
-        info = y.extract_info(url, download=False) or {}
-    for e in info.get("entries") or []:
-        if not e:
-            continue
-        cid = e.get("channel_id") or e.get("id") or ""
-        if not cid.startswith("UC"):
-            m = re.search(r"(UC[\w-]{22})", e.get("url") or "")
-            cid = m.group(1) if m else ""
-        if cid.startswith("UC"):
-            return {"id": cid, "title": e.get("channel") or e.get("title") or entry}
+    if API_KEY:
+        res = api("search", part="snippet", q=entry, type="channel", maxResults=1)
+        for it in res.get("items", []):
+            return {"id": it["snippet"]["channelId"], "title": it["snippet"]["channelTitle"]}
+        return None
+    try:
+        import yt_dlp
+        url = f"https://www.youtube.com/results?search_query={quote(entry)}&sp=EgIQAg%253D%253D"
+        with yt_dlp.YoutubeDL({"quiet": True, "extract_flat": True, "playlistend": 3,
+                               "ignoreerrors": True}) as y:
+            info = y.extract_info(url, download=False) or {}
+        for e in info.get("entries") or []:
+            cid = (e or {}).get("channel_id") or (e or {}).get("id") or ""
+            if cid.startswith("UC"):
+                return {"id": cid, "title": e.get("channel") or e.get("title") or entry}
+    except Exception as e:
+        log("resolve fail", entry, e)
     return None
 
 
 def resolve_all(entries: list[str]) -> dict:
     cache = load_json(RESOLVED, {})
     for entry in entries:
-        if entry in cache and cache[entry]:
+        if cache.get(entry):
             continue
-        r = resolve_channel(entry)
-        log("resolve:", entry, "->", r)
-        cache[entry] = r
-        time.sleep(1)
-    # usuń z cache to, czego już nie ma na liście
+        cache[entry] = resolve_channel(entry)
+        log("resolve:", entry, "->", cache[entry])
+        time.sleep(0.5)
     cache = {k: v for k, v in cache.items() if k in entries}
     RESOLVED.write_text(json.dumps(cache, ensure_ascii=False, indent=2), encoding="utf-8")
     return cache
 
 
 # ---------- źródła ----------
-
-def rss_views(en) -> int:
-    st = en.find("media:group/media:community/media:statistics", NS)
-    try:
-        return int(st.get("views", 0)) if st is not None else 0
-    except ValueError:
-        return 0
-
 
 def from_rss(channel_id: str, since: datetime) -> list[dict]:
     url = f"https://www.youtube.com/feeds/videos.xml?channel_id={channel_id}"
@@ -137,81 +146,72 @@ def from_rss(channel_id: str, since: datetime) -> list[dict]:
         pub = datetime.fromisoformat(en.findtext("atom:published", "", NS).replace("Z", "+00:00"))
         if pub < since:
             continue
-        vid = en.findtext("yt:videoId", "", NS)
         link = en.find("atom:link", NS)
-        href = link.get("href") if link is not None else ""
         out.append({
-            "id": vid,
+            "id": en.findtext("yt:videoId", "", NS),
             "title": en.findtext("atom:title", "", NS),
             "channel": en.findtext("atom:author/atom:name", "", NS),
             "channel_id": channel_id,
             "published": pub.isoformat(),
-            "description": en.findtext("media:group/media:description", "", NS)[:1500],
-            "views": rss_views(en),
-            "is_short_link": "/shorts/" in href,
+            "description": en.findtext("media:group/media:description", "", NS)[:2000],
+            "is_short_link": link is not None and "/shorts/" in (link.get("href") or ""),
             "source": "subskrypcja",
         })
     return out
 
 
-def from_search(query: str) -> list[dict]:
+def from_api_search(query: str, since: datetime) -> list[dict]:
+    res = api("search", part="snippet", q=query, type="video", order="relevance",
+              publishedAfter=since.strftime("%Y-%m-%dT%H:%M:%SZ"),
+              maxResults=SEARCH_PER_QUERY, safeSearch="none")
     out = []
-    with ydl({"extract_flat": True}) as y:
-        info = y.extract_info(f"ytsearchdate{SEARCH_PER_QUERY}:{query}", download=False) or {}
-    for e in info.get("entries") or []:
-        if not e or not e.get("id"):
+    for it in res.get("items", []):
+        sn = it["snippet"]
+        if sn.get("liveBroadcastContent") in ("live", "upcoming"):
             continue
         out.append({
-            "id": e["id"],
-            "title": e.get("title", ""),
-            "channel": e.get("channel") or e.get("uploader") or "",
-            "channel_id": e.get("channel_id") or "",
-            "published": None,
-            "description": (e.get("description") or "")[:1500],
-            "duration": e.get("duration"),
-            "views": e.get("view_count") or 0,
-            "source": f"wyszukiwanie: {query}",
+            "id": it["id"]["videoId"],
+            "title": sn.get("title", ""),
+            "channel": sn.get("channelTitle", ""),
+            "channel_id": sn.get("channelId", ""),
+            "published": sn.get("publishedAt"),
+            "description": sn.get("description", ""),
+            "source": "spoza subów",
+            "query": query,
         })
     return out
 
 
-# ---------- wzbogacanie ----------
+# ---------- wzbogacanie przez API (1 jednostka / 50 filmów) ----------
 
-def enrich(v: dict) -> dict:
-    """Dokłada czas trwania, pełniejszy opis, datę. Best-effort."""
-    try:
-        with ydl() as y:
-            info = y.extract_info(f"https://www.youtube.com/watch?v={v['id']}", download=False)
-        if info:
-            v["duration"] = info.get("duration") or v.get("duration")
-            v["description"] = (info.get("description") or v.get("description") or "")[:2500]
-            v["views"] = info.get("view_count") or v.get("views")
-            v["likes"] = info.get("like_count")
-            v["live_status"] = info.get("live_status")
-            v["chapters"] = [c.get("title") for c in (info.get("chapters") or [])][:25]
-            v["tags"] = (info.get("tags") or [])[:15]
-            if not v.get("published") and info.get("timestamp"):
-                v["published"] = datetime.fromtimestamp(info["timestamp"], timezone.utc).isoformat()
-            elif not v.get("published") and info.get("upload_date"):
-                v["published"] = datetime.strptime(info["upload_date"], "%Y%m%d").replace(tzinfo=timezone.utc).isoformat()
-    except Exception as e:
-        log("enrich fail", v["id"], e)
-    return v
-
-
-def transcript(video_id: str) -> str | None:
-    try:
-        from youtube_transcript_api import YouTubeTranscriptApi
-        langs = ["pl", "en"]
-        if hasattr(YouTubeTranscriptApi, "get_transcript"):   # stare wersje (<1.0)
-            parts = [s["text"] for s in YouTubeTranscriptApi.get_transcript(video_id, languages=langs)]
-        else:                                                   # wersje 1.x
-            parts = [s.text for s in YouTubeTranscriptApi().fetch(video_id, languages=langs)]
-        text = " ".join(p.replace("\n", " ") for p in parts)
-        return text[:TRANSCRIPT_CHARS] if text else None
-    except Exception as e:
-        log("transcript fail", video_id, type(e).__name__)
-        return None
+def enrich_api(videos: list[dict]) -> None:
+    by_id = {v["id"]: v for v in videos}
+    ids = list(by_id)
+    for i in range(0, len(ids), 50):
+        res = api("videos", part="snippet,contentDetails,statistics", id=",".join(ids[i:i + 50]))
+        for it in res.get("items", []):
+            v = by_id[it["id"]]
+            sn, st, cd = it["snippet"], it.get("statistics", {}), it["contentDetails"]
+            v["duration"] = iso_duration(cd.get("duration", ""))
+            v["description"] = (sn.get("description") or v.get("description") or "")[:2500]
+            v["tags"] = (sn.get("tags") or [])[:15]
+            v["language"] = sn.get("defaultAudioLanguage") or sn.get("defaultLanguage")
+            v["views"] = int(st.get("viewCount", 0))
+            v["likes"] = int(st.get("likeCount", 0)) if "likeCount" in st else None
+            v["comments"] = int(st.get("commentCount", 0)) if "commentCount" in st else None
+            v["live"] = sn.get("liveBroadcastContent")
+            v["chapters"] = re.findall(r"^\s*\(?\d{1,2}:\d{2}(?::\d{2})?\)?\s*[-–—]?\s*(.+)$",
+                                       v["description"], flags=re.M)[:25]
+    # wielkość kanałów
+    chans = list({v["channel_id"] for v in videos if v.get("channel_id")})
+    subs = {}
+    for i in range(0, len(chans), 50):
+        res = api("channels", part="statistics", id=",".join(chans[i:i + 50]))
+        for it in res.get("items", []):
+            st = it.get("statistics", {})
+            subs[it["id"]] = None if st.get("hiddenSubscriberCount") else int(st.get("subscriberCount", 0))
+    for v in videos:
+        v["channel_subscribers"] = subs.get(v.get("channel_id"))
 
 
 # ---------- main ----------
@@ -220,73 +220,81 @@ def main():
     now = datetime.now(timezone.utc)
     since = now - timedelta(hours=LOOKBACK_HOURS)
     seen = set(load_json(SEEN, []))
+    blocked = {l.lower() for l in read_list("blocked.txt")}
 
     channels = resolve_all(read_list("channels.txt"))
-    candidates: dict[str, dict] = {}
-
-    for name, ch in channels.items():
-        if not ch:
-            continue
-        for v in from_rss(ch["id"], since):
-            candidates.setdefault(v["id"], v)
-        time.sleep(0.3)
-    n_subs = len(candidates)
-
     sub_ids = {c["id"] for c in channels.values() if c}
-    for q in read_list("queries.txt"):
-        try:
-            for v in from_search(q):
-                if v["channel_id"] in sub_ids:
-                    continue  # i tak mamy przez RSS
-                candidates.setdefault(v["id"], v)
-        except Exception as e:
-            log("search fail", q, e)
-        time.sleep(1)
 
-    fresh = [v for v in candidates.values() if v["id"] not in seen and not v.get("is_short_link")]
-    # subskrypcje najpierw, potem wyszukiwania
-    fresh.sort(key=lambda v: (v["source"] != "subskrypcja", -(v.get("views") or 0)))
-    fresh = fresh[:MAX_CANDIDATES]
+    cand: dict[str, dict] = {}
+    for ch in channels.values():
+        if ch:
+            for v in from_rss(ch["id"], since):
+                cand.setdefault(v["id"], v)
+            time.sleep(0.2)
+    n_subs = len(cand)
+
+    n_search_raw = 0
+    queries = read_list("queries.txt")
+    if API_KEY and queries:
+        # rotacja: przy więcej niż MAX_SEARCH_QUERIES bierzemy inny wycinek każdego dnia
+        if len(queries) > MAX_SEARCH_QUERIES:
+            start = (now.toordinal() * MAX_SEARCH_QUERIES) % len(queries)
+            queries = (queries + queries)[start:start + MAX_SEARCH_QUERIES]
+        for q in queries:
+            for v in from_api_search(q, since):
+                n_search_raw += 1
+                if v["channel_id"] in sub_ids:
+                    continue
+                cand.setdefault(v["id"], v)
+    elif not API_KEY:
+        log("Brak YT_API_KEY - pomijam wyszukiwanie spoza subów")
+
+    fresh = [v for v in cand.values()
+             if v["id"] not in seen and not v.get("is_short_link")
+             and v.get("channel", "").lower() not in blocked]
+
+    if API_KEY:
+        enrich_api(fresh)
 
     out = []
-    transcripts_ok = 0
     for v in fresh:
-        enrich(v)
-        if v.get("live_status") in ("is_upcoming", "is_live"):
+        if v.get("live") in ("live", "upcoming"):
             continue
-        if v.get("duration") and v["duration"] < MIN_DURATION_S:
+        dur = v.get("duration") or 0
+        min_d = MIN_DURATION_SEARCH_S if v["source"] != "subskrypcja" else MIN_DURATION_S
+        if dur and dur < min_d:
             continue
-        if v.get("published"):
-            try:
-                if datetime.fromisoformat(v["published"]) < since:
-                    continue
-            except Exception:
-                pass
-        t = transcript(v["id"])
-        if t:
-            v["transcript"] = t
-            transcripts_ok += 1
+        if v["source"] != "subskrypcja" and not dur:
+            continue
         v["url"] = f"https://www.youtube.com/watch?v={v['id']}"
+        if v.get("views") and v.get("likes") is not None:
+            v["like_ratio_pct"] = round(100 * v["likes"] / max(v["views"], 1), 2)
         out.append(v)
-        time.sleep(0.5)
+
+    subs_out = [v for v in out if v["source"] == "subskrypcja"]
+    search_out = sorted((v for v in out if v["source"] != "subskrypcja"),
+                        key=lambda v: -(v.get("views") or 0))[:MAX_SEARCH_CANDIDATES]
+    out = subs_out + search_out
 
     LATEST.write_text(json.dumps({
         "generated_at": now.isoformat(),
         "lookback_hours": LOOKBACK_HOURS,
+        "api_key_present": bool(API_KEY),
         "stats": {
-            "channels_resolved": sum(1 for c in channels.values() if c),
+            "channels_resolved": len(sub_ids),
             "channels_unresolved": [k for k, c in channels.items() if not c],
-            "from_subscriptions": n_subs,
-            "candidates_total": len(candidates),
-            "after_filters": len(out),
-            "with_transcript": transcripts_ok,
+            "from_subscriptions_raw": n_subs,
+            "search_queries": len(queries) if API_KEY else 0,
+            "search_results_raw": n_search_raw,
+            "subscriptions_after_filters": len(subs_out),
+            "outside_subs_after_filters": len(search_out),
         },
         "videos": out,
     }, ensure_ascii=False, indent=1), encoding="utf-8")
 
     seen.update(v["id"] for v in out)
     SEEN.write_text(json.dumps(list(seen)[-SEEN_KEEP:]), encoding="utf-8")
-    log(f"OK: {len(out)} filmów ({transcripts_ok} z transkryptem)")
+    log(f"OK: {len(subs_out)} z subów, {len(search_out)} spoza subów")
 
 
 if __name__ == "__main__":
