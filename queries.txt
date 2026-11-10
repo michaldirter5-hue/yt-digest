@@ -1,18 +1,43 @@
-# Wyszukiwania do odkrywania nowych kanałów (najnowsze filmy).
-# Jedno zapytanie na linię. Linie z # są ignorowane.
-analiza makroekonomiczna polska
-inflacja stopy procentowe RPP analiza
-rynek akcji GPW analiza spółki
+# Zapytania do szukania filmów spoza subów (ostatnie 48 h, sortowanie po trafności).
+# Jedno na linię, max 40 dziennie (przy większej liczbie rotują). Linie z # są ignorowane.
+# --- ekonomia / makro ---
+analiza makroekonomiczna Polska
+inflacja stopy procentowe RPP
+gospodarka Polski analiza ekonomista
+ekonomia austriacka wykład
+polityka monetarna bank centralny
+macroeconomics explained
+global economy outlook analysis
+# --- inwestycje / rynki ---
+analiza spółki GPW
 inwestowanie długoterminowe ETF
-analiza fundamentalna spółki dywidendowe
+spółki dywidendowe analiza
+obligacje skarbowe inwestowanie
+rynek akcji analiza fundamentalna
+value investing analysis
+stock market analysis long term
+portfolio management investing
+# --- bitcoin ---
 bitcoin analiza on-chain
-bitcoin cykl rynkowy analiza
-ekonomia austriacka
-psychoterapia wywiad psychoterapeuta
-psychologia rozwoju osobistego wywiad
-męskość psychologia rozmowa
-mtb enduro polska
-bmx street
-macro economics deep dive
+bitcoin cykl rynkowy
 bitcoin on-chain analysis
+bitcoin macro liquidity
+bitcoin market cycle
+# --- rozwój osobisty / psychologia ---
+psychoterapeuta wywiad
+psychoterapia rozmowa
+psychologia emocji wykład
+rozwój osobisty nawyki psychologia
+self development psychology
+psychotherapy interview
+# --- męskość / manosfera ---
+męskość psychologia rozmowa
+relacje damsko-męskie psycholog
+masculinity psychology
+# --- MTB / BMX ---
+mtb enduro
 mtb trail riding
+downhill mtb
+mtb technika jazdy
+bmx street
+bmx park riding
