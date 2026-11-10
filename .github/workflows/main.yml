@@ -1,0 +1,28 @@
+name: Zbierz filmy
+
+on:
+  schedule:
+    - cron: "30 3 * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -U -r requirements.txt
+      - run: python fetch.py
+      - name: Zapisz wynik
+        run: |
+          git config user.name "yt-digest-bot"
+          git config user.email "actions@github.com"
+          git add data/
+          git diff --cached --quiet || git commit -m "dane $(date -u +%F)"
+          git push
