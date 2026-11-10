@@ -95,7 +95,10 @@
     "id": "UCXasJkcS9vY8X4HgzReo10A",
     "title": "Piotr Ostapowicz"
   },
-  "Druga Strona Medalu": null,
+  "Druga Strona Medalu": {
+    "id": "UCwye-GdtjPVDX39-hKqvflg",
+    "title": "Druga Strona Medalu"
+  },
   "Krypto Kamikaze": {
     "id": "UC5zsu2Hu1mmmWuT_vOBPv2Q",
     "title": "Krypto Kamikaze"
