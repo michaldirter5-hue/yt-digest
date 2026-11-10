@@ -1,4 +1,5 @@
 # Zapytania do szukania filmów spoza subów (ostatnie 48 h, sortowanie po trafności).
+# Prefiks [en] = szukaj po angielsku, bez prefiksu = po polsku.
 # Jedno na linię, max 40 dziennie (przy większej liczbie rotują). Linie z # są ignorowane.
 # --- ekonomia / makro ---
 analiza makroekonomiczna Polska
@@ -6,38 +7,39 @@ inflacja stopy procentowe RPP
 gospodarka Polski analiza ekonomista
 ekonomia austriacka wykład
 polityka monetarna bank centralny
-macroeconomics explained
-global economy outlook analysis
+[en] macroeconomics explained
+[en] global economy outlook analysis
 # --- inwestycje / rynki ---
 analiza spółki GPW
 inwestowanie długoterminowe ETF
 spółki dywidendowe analiza
 obligacje skarbowe inwestowanie
 rynek akcji analiza fundamentalna
-value investing analysis
-stock market analysis long term
-portfolio management investing
+[en] value investing analysis
+[en] stock market analysis long term
+[en] portfolio management investing
 # --- bitcoin ---
 bitcoin analiza on-chain
 bitcoin cykl rynkowy
-bitcoin on-chain analysis
-bitcoin macro liquidity
-bitcoin market cycle
+[en] bitcoin on-chain analysis
+[en] bitcoin macro liquidity
+[en] bitcoin market cycle
 # --- rozwój osobisty / psychologia ---
 psychoterapeuta wywiad
 psychoterapia rozmowa
 psychologia emocji wykład
 rozwój osobisty nawyki psychologia
-self development psychology
-psychotherapy interview
+[en] self development psychology
+[en] psychotherapy interview
 # --- męskość / manosfera ---
 męskość psychologia rozmowa
 relacje damsko-męskie psycholog
-masculinity psychology
+[en] masculinity psychology
 # --- MTB / BMX ---
 mtb enduro
-mtb trail riding
-downhill mtb
+[en] mtb enduro race
+[en] mtb trail riding
+[en] downhill mtb
 mtb technika jazdy
-bmx street
-bmx park riding
+[en] bmx street
+[en] bmx park riding
