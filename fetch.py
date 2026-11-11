@@ -26,11 +26,14 @@ LATEST = DATA / "latest.json"
 DISCOVERED = DATA / "discovered_channels.json"
 
 API_KEY = os.environ.get("YT_API_KEY", "").strip()
+# prywatne zapytania rozwojowe (sekret YT_EXTRA_QUERIES, jedno na linię) - zawsze wykonywane
+EXTRA_QUERIES = [l.strip() for l in os.environ.get("YT_EXTRA_QUERIES", "").splitlines()
+                 if l.strip() and not l.strip().startswith("#")]
 API = "https://www.googleapis.com/youtube/v3"
 
 LOOKBACK_HOURS = 48           # okno czasowe nowych filmów
 SEARCH_PER_QUERY = 15         # wyników na zapytanie (1 zapytanie = 100 jednostek limitu)
-MAX_SEARCH_QUERIES = 40       # 40 x 100 = 4000 z 10 000 dziennego limitu
+MAX_SEARCH_QUERIES = 50       # 50 x 100 = 5000 z 10 000 dziennego limitu
 MIN_DURATION_S = 240          # krótsze odrzucamy (Shorts, zajawki)
 MIN_DURATION_SEARCH_S = 480   # dla filmów spoza subów: min. 8 minut
 MAX_SEARCH_CANDIDATES = 120   # ile filmów spoza subów przekazać do oceny
@@ -160,7 +163,7 @@ def from_rss(channel_id: str, since: datetime) -> list[dict]:
     return out
 
 
-def from_api_search(query: str, since: datetime) -> list[dict]:
+def from_api_search(query: str, since: datetime, dev: bool = False) -> list[dict]:
     lang = "pl"
     if query.startswith("[en]"):
         lang, query = "en", query[4:].strip()
@@ -180,8 +183,8 @@ def from_api_search(query: str, since: datetime) -> list[dict]:
             "channel_id": sn.get("channelId", ""),
             "published": sn.get("publishedAt"),
             "description": sn.get("description", ""),
-            "source": "spoza subów",
-            "query": query,
+            "source": "rozwój" if dev else "spoza subów",
+            "query": None if dev else query,   # zapytań rozwojowych nie zapisujemy (repo jest publiczne)
         })
     return out
 
@@ -250,13 +253,15 @@ def main():
 
     n_search_raw = 0
     queries = read_list("queries.txt")
-    if API_KEY and queries:
-        # rotacja: przy więcej niż MAX_SEARCH_QUERIES bierzemy inny wycinek każdego dnia
-        if len(queries) > MAX_SEARCH_QUERIES:
-            start = (now.toordinal() * MAX_SEARCH_QUERIES) % len(queries)
-            queries = (queries + queries)[start:start + MAX_SEARCH_QUERIES]
-        for q in queries:
-            for v in from_api_search(q, since):
+    if API_KEY and (queries or EXTRA_QUERIES):
+        # zapytania rozwojowe zawsze; zwykłe rotują, żeby zmieścić się w limicie
+        room = max(MAX_SEARCH_QUERIES - len(EXTRA_QUERIES), 0)
+        if len(queries) > room:
+            start = (now.toordinal() * max(room, 1)) % max(len(queries), 1)
+            queries = (queries + queries)[start:start + room]
+        plan = [(q, True) for q in EXTRA_QUERIES] + [(q, False) for q in queries]
+        for q, dev in plan:
+            for v in from_api_search(q, since, dev):
                 n_search_raw += 1
                 if v["channel_id"] in sub_ids:
                     continue
@@ -287,9 +292,11 @@ def main():
         out.append(v)
 
     subs_out = [v for v in out if v["source"] == "subskrypcja"]
-    search_out = sorted((v for v in out if v["source"] != "subskrypcja"),
+    search_out = sorted((v for v in out if v["source"] == "spoza subów"),
                         key=lambda v: -(v.get("views") or 0))[:MAX_SEARCH_CANDIDATES]
-    out = subs_out + search_out
+    dev_out = sorted((v for v in out if v["source"] == "rozwój"),
+                     key=lambda v: -(v.get("views") or 0))[:50]
+    out = subs_out + dev_out + search_out
 
     LATEST.write_text(json.dumps({
         "generated_at": now.isoformat(),
@@ -299,7 +306,9 @@ def main():
             "channels_resolved": len(sub_ids),
             "channels_unresolved": [k for k, c in channels.items() if not c],
             "from_subscriptions_raw": n_subs,
-            "search_queries": len(queries) if API_KEY else 0,
+            "search_queries": (len(queries) + len(EXTRA_QUERIES)) if API_KEY else 0,
+            "dev_queries": len(EXTRA_QUERIES),
+            "dev_after_filters": sum(1 for v in out if v["source"] == "rozwój"),
             "search_results_raw": n_search_raw,
             "subscriptions_after_filters": len(subs_out),
             "outside_subs_after_filters": len(search_out),
