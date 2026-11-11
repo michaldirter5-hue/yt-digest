@@ -21,6 +21,7 @@ jobs:
       - run: python fetch.py
         env:
           YT_API_KEY: ${{ secrets.YT_API_KEY }}
+          YT_EXTRA_QUERIES: ${{ secrets.YT_EXTRA_QUERIES }}
       - name: Zapisz wynik
         run: |
           git config user.name "yt-digest-bot"
